@@ -75,6 +75,7 @@ class CoFlowScheduler{
         while (DAGsLeft != 0) {
             //nodeTasks.sort((o1, o2) -> comp(o1.executingTime, o2.executingTime));
             coFlowTasks.sort((o1, o2) -> comp(o1, o2));
+            edgeTasks.sort((o1, o2) -> comp(o1, o2));
 
             int edgeTaskIndex = 0;
 
@@ -89,6 +90,31 @@ class CoFlowScheduler{
                     cpuNode.input.add(new DAGEdgeTime(edgeTasks.get(edgeTaskIndex), currrentTime));
                     edgeTasks.remove(edgeTaskIndex);
                     totoalUsedInputBandwidth += cpuNode.bandwidthFromDB;
+                }
+            }
+
+            int coflowIndex = 0;
+            while (coflowIndex < coFlowTasks.size())
+            {
+                CoFlow coFlow = coFlowTasks.get(coflowIndex);
+                if (coFlow.calBW(remOutputBW, cluster.totalCapacityToDB - totoalUsedOutputBandwidth))
+                {
+                    for (CPUNode cpuNode: coFlow.assignedBW.keySet())
+                    {
+                        cpuNode.bandwidthToDB -= coFlow.assignedBW.get(cpuNode);
+                    }
+                    coFlowTasks.remove(coflowIndex);
+                }
+                else
+                    coflowIndex++;
+            }
+
+            for (CPUNode cpuNode: allCPUs.values())
+            {
+                if (cpuNode.output.size() != 0 && cpuNode.bandwidthToDB > eps)
+                {
+                    cpuNode.output.sort(((o1, o2) -> comp(o1.dagEdge, o2.dagEdge)));
+                    cpuNode.output.getFirst().timeStamp = currrentTime;
                 }
             }
 
@@ -114,7 +140,12 @@ class CoFlowScheduler{
                 }
             }
 
-            currrentTime = nextTime;
+
+            for (CoFlow coFlow: coFlowTasks)
+            {
+                nextTime = Math.min(nextTime, coFlow.expectedFinishTime);
+            }
+
 
             for (CPUNode cpuNode: allCPUs.values())
             {
@@ -129,7 +160,7 @@ class CoFlowScheduler{
                         if (nodesLeftNum == 1)
                         {
                             DAGsLeft--;
-                            completeTime += currrentTime;
+                            completeTime += nextTime;
                         }
 
                         for (DAGEdge child: dagNodeTime.dagNode.children)
@@ -138,7 +169,13 @@ class CoFlowScheduler{
                             DAGInDegree.put(dest, DAGInDegree.get(dest) - 1);
                             if (DAGInDegree.get(dest) == 0)
                             {
+
                                 coFlowTasks.add(new CoFlow(dest, DAGCPUMap));
+                                removeFromOutputQueue(dest);
+                            }
+                            else
+                            {
+                                cpuNode.output.add(new DAGEdgeTime(child, -1));
                             }
                         }
 
@@ -173,30 +210,44 @@ class CoFlowScheduler{
 
                     if (firstNode.timeStamp != -1)
                     {
-                        if (firstNode.timeStamp + calNetworkTime(firstNode.dagEdge.amountOfData, cpuNode.bandwidthToDB) < nextTime + eps)
+                        firstNode.dagEdge.amountOfData -= cpuNode.bandwidthToDB * (nextTime - currrentTime);
+                        if (firstNode.dagEdge.amountOfData < eps)
                         {
-                            inDegree.put(firstNode.dagEdge.destId, inDegree.get(firstNode.dagEdge.destId) - 1);
-                            if (inDegree.get(firstNode.dagEdge.destId) == 0) {
-                                DAGEdge newDAGEdge = new DAGEdge(0, firstNode.dagEdge.srcId, firstNode.dagEdge.destId, firstNode.dagEdge.dag);
-                                edgeTasks.add(newDAGEdge);
-                                for (DAGEdge dagEdge: firstNode.dagEdge.destId.parents)
-                                {
-                                    newDAGEdge.amountOfData += dagEdge.amountOfData;
-                                }
-                            }
                             cpuNode.output.removeFirst();
                             totoalUsedOutputBandwidth -= cpuNode.bandwidthToDB;
                         }
 
 
                     }
-
+                    /*
                     if (cpuNode.output.size() != 0 && cpuNode.output.getFirst().timeStamp == -1 && totoalUsedOutputBandwidth + cpuNode.bandwidthToDB <= cluster.totalCapacityToDB + eps) {
                         cpuNode.output.sort((o1, o2) -> comp(o1.dagEdge, o2.dagEdge));
                         cpuNode.output.get(0).timeStamp = nextTime;
+                    }*/
+                }
+
+
+            }
+
+            for (CoFlow coFlow: coFlowTasks)
+            {
+                if (coFlow.expectedFinishTime < nextTime + eps)
+                {
+                    DAGEdge newDAGEdge = new DAGEdge(0, coFlow.dagNode, coFlow.dagNode, coFlow.dagNode.dag);
+                    edgeTasks.add(newDAGEdge);
+                    for (DAGEdge dagEdge: coFlow.dagNode.parents)
+                    {
+                        newDAGEdge.amountOfData += dagEdge.amountOfDataBU;
+                    }
+
+                    for (CPUNode cpuNode: coFlow.assignedBW.keySet())
+                    {
+                        cpuNode.bandwidthToDB += coFlow.assignedBW.get(cpuNode);
                     }
                 }
             }
+
+            currrentTime = nextTime;
 
 
         }
@@ -208,6 +259,22 @@ class CoFlowScheduler{
 
         return completeTime / DAGs.size();
 
+    }
+
+    public void removeFromOutputQueue(DAGNode dest)
+    {
+        for (CPUNode cpuNode: cluster.allCPUs.values())
+        {
+            for (int i = 0; i < cpuNode.output.size(); i++)
+            {
+                DAGEdgeTime dagEdgeTime = cpuNode.output.get(i);
+                if (dagEdgeTime.dagEdge.destId == dest)
+                {
+                    cpuNode.output.remove(i);
+                    i--;
+                }
+            }
+        }
     }
 
     public Map<DAG, Double> calDAGLength()

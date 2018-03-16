@@ -18,7 +18,7 @@ public class Main {
         //DAGs.add(new DAG(17, 0, 0, 1));
         //DAGs.add(new DAG(0)); // Read a random DAG
 
-        for (int i = 0; i < 20; i++)
+        for (int i = 0; i < 10; i++)
         {
             DAGs.add(new DAG(i, i));
         }
@@ -51,6 +51,14 @@ public class Main {
         System.out.println("SDF + SJF + Spread Scheduler ACT: " + SDFSpreadexecTime);
 
         System.out.println("Speed up(SDF + SJF + Spread -> SDF + SJF): " + SDFexecTime / SDFSpreadexecTime);
+
+
+        CoFlowScheduler coFlowScheduler = new CoFlowScheduler(DAGs, new Cluster(10));
+        double cofexecTime = coFlowScheduler.schedule();
+        System.out.println("SDF + SJF + Spread Scheduler ACT: " + cofexecTime);
+
+        System.out.println("Speed up(SDF + SJF + coflow -> SDF + SJF): " + SDFexecTime / cofexecTime);
+
     }
 
 }
